@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Serverless Image Processor</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <style>
+    .image-container {
+      position: relative;
+      margin-bottom: 20px;
+    }
+    .image-container img {
+      max-width: 100%;
+      max-height: 400px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 5px;
+    }
+    .image-info {
+      margin-top: 10px;
+      font-size: 0.9rem;
+    }
+    .dropzone {
+      border: 2px dashed #0d6efd;
+      border-radius: 8px;
+      padding: 60px 20px;
+      text-align: center;
+      cursor: pointer;
+      background-color: #f8f9fa;
+      transition: background-color 0.3s ease-in-out;
+    }
+    .dropzone.dragover {
+      background-color: #e3f2fd;
+    }
+    .spinner-container {
+      display: none;
+      margin: 20px 0;
+    }
+    .header-logo {
+      max-height: 40px;
+      margin-right: 10px;
+    }
+    .navbar-brand {
+      display: flex;
+      align-items: center;
+    }
+    .card-header {
+      background-color: #f1f1f1;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom mb-4 shadow-sm">
+    <div class="container">
+      <a class="navbar-brand" href="#">
+        <img src="https://a0.awsstatic.com/libra-css/images/logos/aws_smile-header-desktop-en-white_59x35.png" alt="AWS Logo" class="header-logo"/>
+        <strong class="text-dark">Serverless Image Processor</strong>
+      </a>
+    </div>
+  </nav>
+
+  <!-- Main Container -->
+  <div class="container">
+    <!-- Upload Card -->
+    <div class="card mb-4 shadow-sm">
+      <div class="card-header">
+        <h5 class="mb-0">Upload and Process Image</h5>
+      </div>
+      <div class="card-body">
+        <div id="dropzone" class="dropzone mb-3">
+          <p class="mb-0 text-muted">Drag and drop an image here, or click to select a file</p>
+          <input type="file" id="fileInput" accept="image/*" style="display: none;" />
+        </div>
+
+        <div class="row mb-3">
+            <div class="col-md-4">
+              <label for="widthInput" class="form-label">Width (px)</label>
+              <input type="number" class="form-control" id="widthInput" placeholder="e.g., 800" min="1" />
+            </div>
+            <div class="col-md-4">
+              <label for="heightInput" class="form-label">Height (px)</label>
+              <input type="number" class="form-control" id="heightInput" placeholder="e.g., 600" min="1" />
+            </div>
+            <div class="col-md-4">
+              <label for="qualityInput" class="form-label">Quality (1-100)</label>
+              <input type="number" class="form-control" id="qualityInput" value="85" min="1" max="100" />
+            </div>
+          </div>
+          
+
+        <div class="d-grid">
+          <button id="processBtn" class="btn btn-primary btn-lg" disabled>Process Image</button>
+        </div>
+
+        <div id="spinnerContainer" class="spinner-container text-center">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          <p class="mt-2">Processing image...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="row" id="resultContainer" style="display: none;">
+      <div class="col-md-6 mb-4">
+        <div class="card shadow-sm">
+          <div class="card-header">
+            <h5>Original Image</h5>
+          </div>
+          <div class="card-body">
+            <div class="image-container">
+              <img id="originalImage" src="" alt="Original Image" />
+            </div>
+            <div class="image-info" id="originalInfo"></div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6 mb-4">
+        <div class="card shadow-sm">
+          <div class="card-header">
+            <h5>Processed Image</h5>
+          </div>
+          <div class="card-body">
+            <div class="image-container">
+              <img id="processedImage" src="" alt="Processed Image" />
+            </div>
+            <div class="image-info" id="processedInfo"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+
+
+
+
+
+  
+  <!-- JS Config and Logic -->
+  <script src="config.js"></script>
+  <script>
+    // Existing JS remains unchanged
+    const API_URL = config.apiUrl;
+    const ORIGINAL_BUCKET = config.originalBucket;
+    const PROCESSED_BUCKET = config.processedBucket;
+
+    let selectedFile = null;
+
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const processBtn = document.getElementById('processBtn');
+    const spinnerContainer = document.getElementById('spinnerContainer');
+    const resultContainer = document.getElementById('resultContainer');
+    const originalImage = document.getElementById('originalImage');
+    const processedImage = document.getElementById('processedImage');
+    const originalInfo = document.getElementById('originalInfo');
+    const processedInfo = document.getElementById('processedInfo');
+    const widthInput = document.getElementById('widthInput');
+    const heightInput = document.getElementById('heightInput');
+    const qualityInput = document.getElementById('qualityInput');
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('dragover');
+    });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) handleFileSelect(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length) handleFileSelect(e.target.files[0]);
+    });
+
+    processBtn.addEventListener('click', processImage);
+
+    function handleFileSelect(file) {
+      if (!file.type.match('image.*')) return alert('Please select an image file');
+      selectedFile = file;
+      processBtn.disabled = false;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        dropzone.innerHTML = `<img src="${e.target.result}" alt="Selected Image" style="max-height: 200px;" />`;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function processImage() {
+      if (!selectedFile) return;
+      spinnerContainer.style.display = 'block';
+      processBtn.disabled = true;
+
+      try {
+        const base64Image = await readFileAsBase64(selectedFile);
+        const width = widthInput.value ? parseInt(widthInput.value) : null;
+        const height = heightInput.value ? parseInt(heightInput.value) : null;
+        const quality = parseInt(qualityInput.value) || 85;
+
+        const requestData = { image: base64Image, width, height, quality };
+        const requestBody = JSON.stringify(requestData);
+        const apiGatewayRequest = { body: requestBody };
+
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(apiGatewayRequest),
+        });
+
+        const responseText = await response.text();
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}, response: ${responseText}`);
+
+        const responseObj = JSON.parse(responseText);
+        let result;
+
+        if (responseObj.body && typeof responseObj.body === 'string') {
+          try {
+            const bodyObj = JSON.parse(responseObj.body);
+            if (bodyObj.message === "Lambda function is working!") {
+              result = {
+                message: "Image processed successfully (simulated)",
+                original_key: "simulated/original.jpg",
+                processed_key: "simulated/processed.jpg",
+                original_url: "https://via.placeholder.com/800x600?text=Original+Image+(Simulated)",
+                processed_url: "https://via.placeholder.com/400x300?text=Processed+Image+(Simulated)",
+                original_size: 100000,
+                processed_size: 30000,
+                compression_ratio: 3.33
+              };
+              alert("The Lambda function is working in test mode. Using simulated image processing results.");
+            } else {
+              result = bodyObj;
+            }
+          } catch (e) {
+            console.error("Error parsing body JSON:", e);
+            throw new Error("Invalid response format from server");
+          }
+        } else {
+          result = responseObj;
+        }
+
+        originalImage.src = result.original_url;
+        processedImage.src = result.processed_url;
+        const originalSize = formatFileSize(result.original_size);
+        const processedSize = formatFileSize(result.processed_size);
+
+        originalInfo.innerHTML = `<strong>Size:</strong> ${originalSize}<br><strong>Path:</strong> ${result.original_key}`;
+      processedInfo.innerHTML = `<strong>Size:</strong> ${processedSize}<br><strong>Path:</strong> ${result.processed_key}<br><strong>Compression Ratio:</strong> ${result.compression_ratio}x`;
+
+
+        resultContainer.style.display = 'flex';
+
+      } catch (error) {
+        console.error('Error processing image:', error);
+        alert('Error processing image: ' + error.message);
+      } finally {
+        spinnerContainer.style.display = 'none';
+        processBtn.disabled = false;
+      }
+    }
+
+    function readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function formatFileSize(bytes) {
+      if (bytes < 1024) return bytes + ' bytes';
+      else if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
+      else return (bytes / 1048576).toFixed(2) + ' MB';
+    }
+    
+
+  </script>
+</body>
+</html>
